@@ -32,6 +32,8 @@ Todo o processo é executado a partir de uma **máquina virtual limpa**, atravé
 
 ### Sistema Operacional (RHEL-like 10.x)
 
+- Uma instalação mínima já é o suficiente.
+
 Compatível com:
 
 - Red Hat Enterprise Linux 10
