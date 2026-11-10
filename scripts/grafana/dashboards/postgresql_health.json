@@ -1,0 +1,1158 @@
+{
+  "uid": "postgresql-health",
+  "title": "PostgreSQL — Saúde",
+  "description": "Conexões, transações, cache, bancos, locks, consultas lentas, manutenção, checkpoints e WAL (template PostgreSQL by Zabbix agent 2).",
+  "tags": [
+    "zabbix",
+    "postgresql",
+    "saúde"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "Host",
+        "label": "Servidor",
+        "type": "query",
+        "datasource": {
+          "type": "alexanderzobnin-zabbix-datasource",
+          "uid": "zabbix"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "query": {
+          "application": "",
+          "group": "/.*/",
+          "host": "/.*/",
+          "item": "",
+          "itemTag": "",
+          "queryType": "host"
+        },
+        "regex": "",
+        "refresh": 1,
+        "sort": 1,
+        "definition": "",
+        "options": [],
+        "current": {
+          "text": "__ZBX_HOST__",
+          "value": "__ZBX_HOST__"
+        }
+      }
+    ]
+  },
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "saúde"
+      ],
+      "targetBlank": false,
+      "title": "Saúde",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 5
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst s = pg('PGS'), cn = pg('CONN'), ds = pg('DBS'), pr = problems('PROB').filter(p => PGRE.test(p.name));\nconst ping = find(s, /^Ping$/), up = lastOf(s, /^Uptime$/);\nconst pingOk = ping && ping.last === 1 && (NOW - ping.lastT) < 75 * 60000;\nconst upFresh = (() => { const u = find(s, /^Uptime$/); return u && (NOW - u.lastT) < 15 * 60000; })();\nconst alive = pingOk || (upFresh && (!ping || ping.last !== 0));\nconst ver = textLast('VER');\nconst ctot = lastOf(cn, /^Connections sum: Total$/), cpct = lastOf(cn, /^Connections sum: Total, %$/);\nconst hit = lastOf(s, /^Cache hit ratio, %$/);\nconst tps = lastOf(ds, /^Dbstat: Committed transactions per second$/), rb = lastOf(ds, /^Dbstat: Roll backed transactions per second$/);\nconst role = lastOf(s, /^Replication: Recovery role$/), sb = lastOf(s, /^Replication: Standby count$/), lag = lastOf(s, /^Replication: Lag in seconds$/);\nconst xid = lastOf(s, /^Age of oldest xid$/), xidPct = xid === null ? null : xid / 2147483647 * 100;\nconst hi = pr.filter(p => p.sev >= 3).length;\nconst g = [{type: 'text', left: 4, top: 0, style: {text: 'PostgreSQL — ' + HOSTSEL, fill: TH.text, font: '700 18px ' + FONT}},\n           {type: 'text', right: 4, top: 4, style: {text: (ver ? 'versão ' + ver + ' · ' : '') + 'atualizado ' + new Date(NOW).toLocaleTimeString('pt-BR'), fill: TH.sec, font: '12px ' + FONT}}];\nreturn {backgroundColor: 'transparent', graphic: g.concat(tiles([\n  {l: 'Serviço', v: alive ? 'No ar' : (ping || upFresh) ? 'Fora do ar' : '—', c: alive ? C.ok : (ping || upFresh) ? C.crit : C.gray, s: 'uptime ' + fmtDur(up)},\n  {l: 'Conexões', v: fmtN(ctot, 0), c: level(cpct, 70, 90), s: fmtPct(cpct) + ' do max_connections'},\n  {l: 'Cache hit', v: fmtPct(hit), c: hit === null ? C.gray : hit >= 99 ? C.ok : hit >= 95 ? C.warn : C.crit, s: 'blocos lidos da memória'},\n  {l: 'Transações/s', v: fmtN(tps, 1), c: C.info, s: 'rollbacks/s ' + fmtN(rb, 2)},\n  {l: 'Replicação', v: role === null ? '—' : role === 1 ? 'Réplica' : 'Primário', c: C.violet,\n   s: role === 1 ? 'lag ' + fmtN(lag, 1) + ' s' : 'standbys: ' + fmtN(sb, 0)},\n  {l: 'Idade do xid mais antigo', v: fmtN(xid, 0), c: level(xidPct, 50, 75), s: fmtPct(xidPct) + ' do limite de wraparound'},\n  {l: 'Problemas', v: fmtN(pr.length, 0), c: hi ? C.crit : pr.length ? C.warn : C.ok, s: hi + ' de severidade média ou maior'},\n], 30))};\n"
+      },
+      "datasource": {
+        "type": "alexanderzobnin-zabbix-datasource",
+        "uid": "zabbix"
+      },
+      "targets": [
+        {
+          "refId": "PGS",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^(Ping|Uptime|Cache hit ratio, %|Age of oldest xid|Count of autovacuum workers|Replication: (Lag in bytes|Lag in seconds|Recovery role|Standby count|Status))$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "CONN",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^Connections sum: (Active|Idle|Idle in transaction|Idle in transaction \\(aborted\\)|Waiting|Total|Total, %)$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "DBS",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^Dbstat: (Committed transactions|Roll backed transactions|Rows (deleted|fetched|inserted|returned|updated)|Hit blocks read|Disk blocks read|Deadlocks|Conflicts|Number temp bytes|Number temp files) per second$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "DBSIZE",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^DB \\[.*\\]: (Database size|Backends connected|Bloating tables|Database age)$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "LOCK",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^DB \\[.*\\]: (Num of locks total|Num of accessexclusive locks)$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "QRY",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^DB \\[.*\\]: (Queries slow query count|Queries slow transaction count|Queries max query time|Queries max transaction time|Queries max maintenance time)$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "CKPT",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^(Checkpoint: (Buffers written during checkpoints|Buffers written by the background writer|Requested|Scheduled) per second|Bgwriter: Buffers allocated per second)$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "WAL",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "0",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": "/^(WAL: (Bytes written|Segments count)|Archive: (Count of archived files|Count of failed attempts to archive files|Count of files in archive_status need to archive))$/"
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        },
+        {
+          "refId": "PROB",
+          "datasource": {
+            "type": "alexanderzobnin-zabbix-datasource",
+            "uid": "zabbix"
+          },
+          "queryType": "5",
+          "group": {
+            "filter": "/.*/"
+          },
+          "host": {
+            "filter": "$Host"
+          },
+          "item": {
+            "filter": ""
+          },
+          "itemTag": {
+            "filter": ""
+          },
+          "application": {
+            "filter": ""
+          },
+          "proxy": {
+            "filter": ""
+          },
+          "tags": {
+            "filter": ""
+          },
+          "trigger": {
+            "filter": ""
+          },
+          "macro": {
+            "filter": ""
+          },
+          "functions": [],
+          "options": {
+            "acknowledged": 2,
+            "count": false,
+            "disableDataAlignment": false,
+            "hostProxy": false,
+            "hostsInMaintenance": false,
+            "limit": 1001,
+            "minSeverity": 0,
+            "showDisabledItems": false,
+            "skipEmptyValues": false,
+            "sortProblems": "default",
+            "useTimeRange": false,
+            "useTrends": "default",
+            "useZabbixValueMapping": false,
+            "severities": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "showProblems": "problems",
+          "resultFormat": "time_series",
+          "table": {
+            "skipEmptyValues": false
+          },
+          "triggers": {
+            "acknowledged": 2,
+            "count": false
+          },
+          "countTriggersBy": "",
+          "evaltype": "0",
+          "schema": 12,
+          "target": "",
+          "textFilter": ""
+        }
+      ],
+      "maxDataPoints": 600
+    },
+    {
+      "id": 2,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 14,
+        "h": 9
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst cn = pg('CONN');\nconst ttl = 'Conexões', sub = 'Por estado (empilhado), com wait event (tracejado) e % do max_connections (eixo dir.)';\nconst st = [['Active', 'Ativas', C.info], ['Idle', 'Ociosas', C.teal], ['Idle in transaction', 'Ociosas em transação', C.warn],\n            ['Idle in transaction \\\\(aborted\\\\)', 'Transação abortada', C.crit]];\nconst series = st.map(([k, n, c]) => { const s = find(cn, new RegExp('^Connections sum: ' + k + '$'));\n  return s ? line(n, s, c, {stack: 'c', areaStyle: {opacity: 0.35}, lineStyle: {width: 1, color: c}}) : null; }).filter(Boolean);\nconst wt = find(cn, /^Connections sum: Waiting$/);\nif (wt) series.push(line('Com wait event (não empilhado)', wt, C.pink, {lineStyle: {width: 1.2, type: 'dashed', color: C.pink}}));\nconst pct = find(cn, /^Connections sum: Total, %$/);\nif (pct) series.push(line('% do máximo', pct, TH.text, {yAxisIndex: 1, lineStyle: {width: 1.4, type: 'dashed', color: TH.text}}));\nif (!series.length) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 1)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 40, right: 44, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: [{type: 'value', minInterval: 1, axisLabel: axisTxt, splitLine: splitLine},\n          {type: 'value', min: 0, max: 100, axisLabel: Object.assign({formatter: '{value}%'}, axisTxt), splitLine: {show: false}}],\n  series: series};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 14,
+        "y": 5,
+        "w": 10,
+        "h": 9
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst db = pg('DBSIZE');\nconst ttl = 'Bancos de dados', sub = 'Tamanho e conexões por banco';\nconst rowsData = perDb(db, 'Database size').map(x => ({db: x.db, size: x.s.last,\n  be: (db.find(y => y.item === 'DB [' + x.db + ']: Backends connected') || {}).last}))\n  .sort((a, b) => (a.size || 0) - (b.size || 0));\nif (!rowsData.length) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', axisPointer: {type: 'shadow'},\n    formatter: ps => { const r = rowsData[ps[0].dataIndex]; return r.db + '<br/>' + fmtBytes(r.size) + ' · ' + fmtN(r.be, 0) + ' conexões'; }}, tip),\n  grid: {left: 8, right: 110, top: 50, bottom: 8, containLabel: true},\n  xAxis: {type: 'value', axisLabel: Object.assign({formatter: v => fmtBytes(v)}, axisTxt), splitLine: splitLine},\n  yAxis: {type: 'category', data: rowsData.map(r => r.db), axisLabel: axisTxt},\n  series: [{type: 'bar', barMaxWidth: 18, label: {show: true, position: 'right', color: TH.sec,\n              formatter: p => fmtBytes(rowsData[p.dataIndex].size) + ' · ' + fmtN(rowsData[p.dataIndex].be, 0) + ' con.'},\n            data: rowsData.map((r, i) => ({value: r.size || 0, itemStyle: {color: PAL[i % PAL.length], borderRadius: 4}}))}]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst ds = pg('DBS');\nconst ttl = 'Transações', sub = 'Commits e rollbacks por segundo (todos os bancos)';\nconst c = find(ds, /^Dbstat: Committed transactions per second$/), r = find(ds, /^Dbstat: Roll backed transactions per second$/),\n      dl = find(ds, /^Dbstat: Deadlocks per second$/);\nif (!c && !r) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 2)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 44, right: 16, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: {type: 'value', axisLabel: axisTxt, splitLine: splitLine},\n  series: [line('Commits/s', c, C.ok, {areaStyle: {opacity: 0.2}}), line('Rollbacks/s', r, C.warn), line('Deadlocks/s', dl, C.crit)]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst s = pg('PGS'), ds = pg('DBS');\nconst ttl = 'Cache e leitura de blocos', sub = 'Blocos/s da memória × do disco · cache hit % (eixo dir.)';\nconst hb = find(ds, /^Dbstat: Hit blocks read per second$/), db = find(ds, /^Dbstat: Disk blocks read per second$/), hr = find(s, /^Cache hit ratio, %$/);\nif (!hb && !db && !hr) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 2)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 56, right: 48, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: [{type: 'value', axisLabel: axisTxt, splitLine: splitLine},\n          {type: 'value', max: 100, scale: true, axisLabel: Object.assign({formatter: '{value}%'}, axisTxt), splitLine: {show: false}}],\n  series: [line('Da memória', hb, C.teal, {areaStyle: {opacity: 0.2}}), line('Do disco', db, C.warn),\n           line('Cache hit %', hr, C.violet, {yAxisIndex: 1, lineStyle: {width: 1.4, type: 'dashed', color: C.violet}})]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nreturn {backgroundColor: 'transparent', graphic: [\n  {type: 'rect', shape: {x: 0, y: H / 2 - 1, width: W, height: 1}, style: {fill: TH.line}},\n  {type: 'rect', shape: {x: 0, y: H / 2 - 13, width: 194, height: 26, r: 13}, style: {fill: TH.tile, stroke: TH.line}},\n  {type: 'text', x: 14, y: H / 2 - 7, style: {text: 'Carga e concorrência', fill: TH.text, font: '600 13px ' + FONT}}]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst ds = pg('DBS');\nconst ttl = 'Linhas por segundo', sub = 'Operações de leitura e escrita em tuplas';\nconst k = [['fetched', 'Buscadas', C.info], ['returned', 'Retornadas', C.teal], ['inserted', 'Inseridas', C.ok],\n           ['updated', 'Atualizadas', C.violet], ['deleted', 'Excluídas', C.crit]];\nconst series = k.map(([x, n, c]) => { const s = find(ds, new RegExp('^Dbstat: Rows ' + x + ' per second$')); return s ? line(n, s, c) : null; }).filter(Boolean);\nif (!series.length) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 1)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 56, right: 16, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: {type: 'log', logBase: 10, min: 1, axisLabel: axisTxt, splitLine: splitLine},\n  series: series.map(s => Object.assign(s, {data: s.data.map(p => [p[0], p[1] > 0 ? p[1] : null])}))};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst lk = pg('LOCK');\nconst ttl = 'Locks por banco', sub = 'Total de locks mantidos (linhas) e locks exclusivos de acesso (tracejado)';\nconst tot = perDb(lk, 'Num of locks total'), ax = perDb(lk, 'Num of accessexclusive locks');\nif (!tot.length) return emptyOpt(ttl, sub);\nconst series = tot.map((x, i) => line(x.db, x.s, PAL[i % PAL.length]));\nax.forEach((x, i) => { if (x.s.pts.some(p => p[1] > 0)) series.push(line(x.db + ' (access exclusive)', x.s, PAL[tot.findIndex(t => t.db === x.db) % PAL.length], {lineStyle: {width: 1, type: 'dashed'}})); });\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 0)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8, type: 'scroll', width: W * 0.55},\n  grid: {left: 40, right: 16, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: {type: 'value', minInterval: 1, axisLabel: axisTxt, splitLine: splitLine},\n  series: series};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst q = pg('QRY');\nconst ttl = 'Consultas lentas por banco', sub = 'Contagem atual acima do limite ({$PG.QUERY_ETIME.MAX.WARN}) e maior duração';\nconst dbs = dbList(q);\nif (!dbs.length) return emptyOpt(ttl, sub);\nconst v = (d, suf) => { const s = q.find(x => x.item === 'DB [' + d + ']: ' + suf); return s && s.last !== null ? +s.last : 0; };\nconst data = dbs.map(d => ({db: d, sq: v(d, 'Queries slow query count'), st: v(d, 'Queries slow transaction count'),\n                            mq: v(d, 'Queries max query time'), mt: v(d, 'Queries max transaction time'), mm: v(d, 'Queries max maintenance time')}));\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', axisPointer: {type: 'shadow'},\n    formatter: ps => { const r = data[ps[0].dataIndex]; return '<b>' + r.db + '</b><br/>consultas lentas: ' + fmtN(r.sq, 0) + '<br/>transações lentas: ' + fmtN(r.st, 0) +\n      '<br/>maior consulta: ' + fmtN(r.mq, 1) + ' s<br/>maior transação: ' + fmtN(r.mt, 1) + ' s<br/>maior manutenção: ' + fmtN(r.mm, 1) + ' s'; }}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 40, right: 44, top: 56, bottom: 8, containLabel: true},\n  xAxis: {type: 'category', data: data.map(r => r.db), axisLabel: Object.assign({interval: 0}, axisTxt)},\n  yAxis: [{type: 'value', minInterval: 1, axisLabel: axisTxt, splitLine: splitLine},\n          {type: 'value', axisLabel: Object.assign({formatter: '{value} s'}, axisTxt), splitLine: {show: false}}],\n  series: [{name: 'Consultas lentas', type: 'bar', barMaxWidth: 18, itemStyle: {color: C.warn}, data: data.map(r => r.sq)},\n           {name: 'Transações lentas', type: 'bar', barMaxWidth: 18, itemStyle: {color: C.crit}, data: data.map(r => r.st)},\n           {name: 'Maior consulta (s)', type: 'scatter', yAxisIndex: 1, symbolSize: 10, itemStyle: {color: C.violet}, data: data.map(r => r.mq)}]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst s = pg('PGS'), db = pg('DBSIZE'), ds = pg('DBS');\nconst ttl = 'Manutenção', sub = 'Autovacuum, idade dos bancos (wraparound) e tabelas inchadas';\nconst dbs = dbList(db);\nif (!dbs.length) return emptyOpt(ttl, sub);\nconst v = (d, suf) => { const x = db.find(y => y.item === 'DB [' + d + ']: ' + suf); return x ? x.last : null; };\nconst data = dbs.map(d => ({db: d, age: v(d, 'Database age'), bloat: v(d, 'Bloating tables')}));\nconst av = lastOf(s, /^Count of autovacuum workers$/), tmp = lastOf(ds, /^Dbstat: Number temp bytes per second$/);\nconst g = title(ttl, sub).concat([{type: 'text', right: 4, top: 4,\n  style: {text: 'autovacuum ativos: ' + fmtN(av, 0) + ' · temporários: ' + fmtBytes(tmp) + '/s', fill: TH.sec, font: '12px ' + FONT}}]);\nreturn {backgroundColor: 'transparent', graphic: g,\n  tooltip: Object.assign({trigger: 'axis', axisPointer: {type: 'shadow'},\n    formatter: ps => { const r = data[ps[0].dataIndex]; return '<b>' + r.db + '</b><br/>idade: ' + fmtN(r.age, 0) + ' transações (' +\n      fmtPct(r.age / 2147483647 * 100) + ' do limite)<br/>tabelas inchadas: ' + fmtN(r.bloat, 0); }}, tip),\n  legend: {top: 26, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8},\n  grid: {left: 56, right: 44, top: 56, bottom: 8, containLabel: true},\n  xAxis: {type: 'category', data: data.map(r => r.db), axisLabel: Object.assign({interval: 0}, axisTxt)},\n  yAxis: [{type: 'value', axisLabel: Object.assign({formatter: v => fmtN(v / 1e6, 0) + ' mi'}, axisTxt), splitLine: splitLine},\n          {type: 'value', minInterval: 1, axisLabel: axisTxt, splitLine: {show: false}}],\n  series: [{name: 'Idade (xid)', type: 'bar', barMaxWidth: 22,\n            data: data.map(r => ({value: r.age || 0, itemStyle: {color: level((r.age || 0) / 2147483647 * 100, 50, 75), borderRadius: [4, 4, 0, 0]}}))},\n           {name: 'Tabelas inchadas', type: 'scatter', yAxisIndex: 1, symbolSize: 11, itemStyle: {color: C.violet}, data: data.map(r => r.bloat || 0)}]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nreturn {backgroundColor: 'transparent', graphic: [\n  {type: 'rect', shape: {x: 0, y: H / 2 - 1, width: W, height: 1}, style: {fill: TH.line}},\n  {type: 'rect', shape: {x: 0, y: H / 2 - 13, width: 161, height: 26, r: 13}, style: {fill: TH.tile, stroke: TH.line}},\n  {type: 'text', x: 14, y: H / 2 - 7, style: {text: 'Escrita em disco', fill: TH.text, font: '600 13px ' + FONT}}]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 14,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst ck = pg('CKPT');\nconst ttl = 'Checkpoints e bgwriter', sub = 'Buffers gravados por segundo · checkpoints solicitados × agendados (eixo dir.)';\nconst b1 = find(ck, /^Checkpoint: Buffers written during checkpoints per second$/), b2 = find(ck, /^Checkpoint: Buffers written by the background writer per second$/),\n      al = find(ck, /^Bgwriter: Buffers allocated per second$/), rq = find(ck, /^Checkpoint: Requested per second$/), sc = find(ck, /^Checkpoint: Scheduled per second$/);\nif (!b1 && !b2 && !al) return emptyOpt(ttl, sub);\nreturn {backgroundColor: 'transparent', graphic: title(ttl, sub),\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtN(v, 3)}, tip),\n  legend: {top: 2, right: 4, textStyle: axisTxt, itemWidth: 12, itemHeight: 8, type: 'scroll', width: W * 0.55},\n  grid: {left: 48, right: 48, top: 56, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: [{type: 'value', axisLabel: axisTxt, splitLine: splitLine}, {type: 'value', axisLabel: axisTxt, splitLine: {show: false}}],\n  series: [line('Buffers no checkpoint/s', b1, C.info, {areaStyle: {opacity: 0.2}}), line('Buffers pelo bgwriter/s', b2, C.teal),\n           line('Buffers alocados/s', al, C.gray, {lineStyle: {width: 1, color: C.gray}}),\n           line('Checkpoints solicitados/s', rq, C.crit, {yAxisIndex: 1}), line('Checkpoints agendados/s', sc, C.ok, {yAxisIndex: 1})]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 14,
+        "y": 42,
+        "w": 10,
+        "h": 8
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst w = pg('WAL');\nconst ttl = 'WAL e arquivamento', sub = 'Gravação de WAL e fila do archive_command';\nconst by = w.find(x => x.item === 'WAL: Bytes written'), seg = lastOf(w, /^WAL: Segments count$/);\nconst arc = lastOf(w, /^Archive: Count of archived files$/), fail = lastOf(w, /^Archive: Count of failed attempts to archive files$/),\n      pend = lastOf(w, /^Archive: Count of files in archive_status need to archive$/);\nif (!w.length) return emptyOpt(ttl, sub);\nconst g = title(ttl, sub);\nconst tw = Math.min(170, (W - 30) / 4);\nconst items = [['Segmentos', fmtN(seg, 0), C.info], ['Arquivados', fmtN(arc, 0), C.ok], ['Falhas', fmtN(fail, 0), fail ? C.crit : C.ok], ['Pendentes', fmtN(pend, 0), level(pend, 10, 100)]];\nitems.forEach((t, i) => {\n  const x = i * (tw + 10);\n  g.push({type: 'rect', shape: {x: x, y: 46, width: tw, height: 52, r: 6}, style: {fill: TH.tile, stroke: TH.line}});\n  g.push({type: 'text', x: x + 10, y: 52, style: {text: t[0], fill: TH.sec, font: '11px ' + FONT}});\n  g.push({type: 'text', x: x + 10, y: 70, style: {text: t[1], fill: t[2], font: '700 18px ' + FONT}});\n});\nreturn {backgroundColor: 'transparent', graphic: g,\n  tooltip: Object.assign({trigger: 'axis', valueFormatter: v => fmtBytes(v)}, tip),\n  grid: {left: 64, right: 16, top: 112, bottom: 26},\n  xAxis: timeAxis,\n  yAxis: {type: 'value', axisLabel: Object.assign({formatter: v => fmtBytes(v)}, axisTxt), splitLine: splitLine},\n  series: [line('WAL gravado', by, C.violet, {areaStyle: {opacity: 0.2}})]};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "volkovlabs-echarts-panel",
+      "title": "",
+      "transparent": true,
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 6
+      },
+      "options": {
+        "renderer": "canvas",
+        "map": "none",
+        "editorMode": "code",
+        "editor": {
+          "format": "auto",
+          "height": 600
+        },
+        "getOption": "const TH = (() => {\n  try {\n    const t = context.grafana.theme;\n    return {text: t.colors.text.primary, sec: t.colors.text.secondary, line: t.colors.border.weak,\n            tile: t.colors.background.secondary, dark: !!t.isDark};\n  } catch (e) { return {text: '#1F2937', sec: '#6B7280', line: '#E5E7EB', tile: '#F5F7FA', dark: false}; }\n})();\nconst C = {ok: '#2E9E6B', warn: '#F2A31B', crit: '#D64541', info: '#3B7DD8', violet: '#7E57C2', teal: '#14A3A3',\n           gray: '#8A99A8', pink: '#D6457E'};\nconst PAL = [C.info, C.violet, C.teal, C.warn, C.pink, C.ok, '#5C6BC0', '#8D6E63'];\nconst SEV = {5: {n: 'Desastre', c: '#7A1F1F'}, 4: {n: 'Alta', c: '#D64541'}, 3: {n: 'Média', c: '#E86235'},\n             2: {n: 'Atenção', c: '#F2B134'}, 1: {n: 'Informação', c: '#7FA3C9'}, 0: {n: 'Não classif.', c: '#B8C2CC'}};\nconst FONT = 'Inter, Helvetica, Arial, sans-serif';\nconst W = context.panel.chart.getWidth(), H = context.panel.chart.getHeight();\nconst frames = context.panel.data.series || [];\nconst NOW = Date.now();\nconst arr = v => (v && typeof v.toArray === 'function') ? v.toArray() : Array.from(v || []);\n\n/* Uma série por item: aceita campo numérico com labels (host, item, item_key) ou o nome do campo */\nconst metric = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const tf = f.fields.find(x => x.type === 'time'); if (!tf) return;\n    const tv = arr(tf.values);\n    f.fields.filter(x => x.type === 'number').forEach(x => {\n      const lb = x.labels || {}, vv = arr(x.values);\n      let last = null, lastT = 0;\n      for (let i = vv.length - 1; i >= 0; i--) if (vv[i] !== null && vv[i] !== undefined) { last = vv[i]; lastT = tv[i]; break; }\n      const name = lb.item || (x.config && x.config.displayNameFromDS) || x.name;\n      out.push({host: lb.host || '', item: name, key: lb.item_key || '', t: tv, v: vv, last: last, lastT: lastT,\n                pts: tv.map((t, i) => [t, vv[i]]).filter(p => p[1] !== null && p[1] !== undefined)});\n    });\n  });\n  return out;\n};\nconst find = (list, re) => list.find(s => re.test(s.item));\nconst lastOf = (list, re) => { const s = find(list, re); return s ? s.last : null; };\nconst problems = ref => {\n  const out = [];\n  frames.filter(f => f.refId === ref).forEach(f => {\n    f.fields.forEach(fld => arr(fld.values).forEach(v => {\n      if (Array.isArray(v)) out.push(...v); else if (v && typeof v === 'object' && (v.triggerid || v.eventid)) out.push(v);\n    }));\n  });\n  const seen = {};\n  return out.map(p => ({id: p.eventid || p.triggerid, sev: +p.severity || 0, name: p.name || p.description || '',\n    host: (p.hosts && p.hosts[0] && (p.hosts[0].name || p.hosts[0].host)) || '', ts: +p.timestamp || +p.lastchange || 0,\n    ack: p.acknowledged === '1' || p.acknowledged === 1}))\n    .filter(p => { if (seen[p.id]) return false; seen[p.id] = 1; return true; })\n    .sort((a, b) => b.sev - a.sev || b.ts - a.ts);\n};\nconst fmtN = (v, d) => (v === null || v === undefined || isNaN(v)) ? '—' : (+v).toLocaleString('pt-BR', {maximumFractionDigits: d === undefined ? 1 : d});\nconst fmtPct = v => (v === null || v === undefined) ? '—' : fmtN(v, 1) + '%';\nconst fmtBytes = v => { if (v === null || v === undefined) return '—'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1024 && i < u.length - 1) { x /= 1024; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtBits = v => { if (v === null || v === undefined) return '—'; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0, x = +v;\n  while (Math.abs(x) >= 1000 && i < u.length - 1) { x /= 1000; i++; } return fmtN(x, x < 10 ? 2 : 1) + ' ' + u[i]; };\nconst fmtDur = s => { if (s === null || s === undefined) return '—'; s = +s; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);\n  return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'min' : m + 'min'; };\nconst level = (v, w, c) => (v === null || v === undefined) ? C.gray : v >= c ? C.crit : v >= w ? C.warn : C.ok;\nconst title = (txt, sub) => [\n  {type: 'text', left: 4, top: 2, style: {text: txt, fill: TH.text, font: '600 15px ' + FONT}},\n  sub ? {type: 'text', left: 4, top: 22, style: {text: sub, fill: TH.sec, font: '12px ' + FONT}} : null\n].filter(Boolean);\nconst emptyOpt = (txt, sub, msg) => ({backgroundColor: 'transparent',\n  graphic: title(txt, sub).concat([{type: 'text', left: 'center', top: 'middle',\n    style: {text: msg || 'Sem dados no período', fill: TH.sec, font: '13px ' + FONT, align: 'center'}}])});\nconst tip = {backgroundColor: TH.dark ? '#1F2430' : '#FFFFFF', borderColor: TH.line, textStyle: {color: TH.text, fontFamily: FONT}};\nconst axisTxt = {color: TH.sec, fontFamily: FONT, fontSize: 11};\nconst splitLine = {lineStyle: {color: TH.line}};\nconst timeAxis = {type: 'time', axisLabel: Object.assign({hideOverlap: true}, axisTxt), axisLine: {lineStyle: {color: TH.line}}, splitLine: {show: false}};\nconst line = (name, s, color, extra) => Object.assign({name: name, type: 'line', showSymbol: false, smooth: 0.2, sampling: 'lttb',\n  lineStyle: {width: 1.6, color: color}, itemStyle: {color: color}, data: s ? s.pts : []}, extra || {});\nconst tiles = (list, top) => {\n  const gap = 10, n = list.length, tw = (W - gap * (n - 1)) / n, th = Math.max(H - top - 6, 56), g = [];\n  list.forEach((t, i) => {\n    const x = i * (tw + gap);\n    g.push({type: 'rect', shape: {x: x, y: top, width: tw, height: th, r: 8}, style: {fill: TH.tile, stroke: TH.line}});\n    g.push({type: 'rect', shape: {x: x, y: top, width: 4, height: th, r: [8, 0, 0, 8]}, style: {fill: t.c || C.gray}});\n    g.push({type: 'text', x: x + 14, y: top + 10, style: {text: t.l, fill: TH.sec, font: '12px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    g.push({type: 'text', x: x + 14, y: top + th / 2 - 6, style: {text: t.v, fill: t.c || TH.text, font: '700 22px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n    if (t.s) g.push({type: 'text', x: x + 14, y: top + th - 22, style: {text: t.s, fill: TH.sec, font: '11px ' + FONT, width: tw - 20, overflow: 'truncate'}});\n  });\n  return g;\n};\nlet HOSTSEL = '__ZBX_HOST__';\ntry { const h = context.grafana.replaceVariables('$Host'); if (h && h.indexOf('$') !== 0) HOSTSEL = h; } catch (e) {}\n\n/* Só itens do PostgreSQL (item_key pgsql.*); sem item_key, mantém */\nconst pg = ref => metric(ref).filter(s => !s.key || /^pgsql\\./.test(s.key));\nconst dbOf = s => (/^DB \\[(.+?)\\]:/.exec(s.item) || [])[1];\nconst dbList = list => [...new Set(list.map(dbOf).filter(Boolean))].filter(d => d !== '{#DBNAME}').sort();\nconst perDb = (list, suffix) => dbList(list).map(d => ({db: d, s: list.find(x => x.item === 'DB [' + d + ']: ' + suffix)})).filter(x => x.s);\nconst textLast = ref => {\n  let out = null;\n  frames.filter(f => f.refId === ref).forEach(f => {\n    const fld = f.fields.find(x => x.type === 'string' && (!x.labels || !x.labels.item_key || /^pgsql\\./.test(x.labels.item_key)));\n    if (!fld) return; const vv = arr(fld.values).filter(v => v !== null && v !== undefined && v !== '');\n    if (vv.length) out = vv[vv.length - 1];\n  });\n  return out;\n};\nconst PGRE = /postgres|pgsql|replica|checkpoint|connection|cache hit|xid|wal|archive|lock|deadlock|query|transaction|bloat|DB \\[/i;\n\nconst pr = problems('PROB').filter(p => PGRE.test(p.name));\nconst ttl = 'Problemas do PostgreSQL', sub = 'Problemas ativos do host relacionados ao banco';\nif (!pr.length) return emptyOpt(ttl, sub, 'Nenhum problema ativo do PostgreSQL');\nconst g = title(ttl, sub), rh = 30;\npr.forEach((p, j) => {\n  const y = 50 + j * rh; if (y + rh > H) return;\n  const sv = SEV[p.sev] || SEV[0];\n  g.push({type: 'rect', shape: {x: 0, y: y, width: W, height: rh - 4, r: 6}, style: {fill: TH.tile}});\n  g.push({type: 'rect', shape: {x: 0, y: y, width: 4, height: rh - 4, r: [6, 0, 0, 6]}, style: {fill: sv.c}});\n  g.push({type: 'rect', shape: {x: 12, y: y + 5, width: 86, height: 16, r: 8}, style: {fill: sv.c, opacity: 0.18}});\n  g.push({type: 'text', x: 55, y: y + 7, style: {text: sv.n, fill: sv.c, font: '600 11px ' + FONT, align: 'center'}});\n  g.push({type: 'text', x: 110, y: y + 7, style: {text: p.name, fill: TH.text, font: '12px ' + FONT, width: W - 300, overflow: 'truncate'}});\n  const since = p.ts ? new Date(p.ts * 1000).toLocaleString('pt-BR', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';\n  g.push({type: 'text', x: W - 12, y: y + 7, style: {text: (p.ack ? '✓ reconhecido · ' : '') + 'desde ' + since, fill: TH.sec, font: '11px ' + FONT, align: 'right'}});\n});\nreturn {backgroundColor: 'transparent', graphic: g};\n"
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 41
+}

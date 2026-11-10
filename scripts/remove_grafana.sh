@@ -11,7 +11,7 @@ grafanaConfig="/etc/grafana/grafana.ini"
 grafanaRepo="/etc/yum.repos.d/grafana.repo"
 sslPath="/usr/share/grafana/ssl"
 pgDatabase="db_grafana"
-pgUser="ugrafanadmin"
+pgUser="usr_userpanel"
 pgData="/storage/postgres/data"
 removeDatabase=false
 
