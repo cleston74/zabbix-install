@@ -72,13 +72,13 @@ dnf -y install git
 ### Clone o repositório
 
 ```bash
-git clone https://github.com/cleston74/zabbix7-install.git
+git clone https://github.com/cleston74/zabbix-install.git
 ```
 
 ### Acesse o diretório do projeto
 
 ```bash
-cd zabbix7-install/scripts
+cd zabbix-install/scripts
 ```
 
 ### Torne os scripts executáveis
